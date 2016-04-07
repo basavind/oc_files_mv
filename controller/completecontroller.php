@@ -22,7 +22,6 @@ class CompleteController extends Controller {
 	/** @var \OC\IL10N */
 	private $l;
 	private $storage;
-	private $showLayers = 2; // TODO: Move to settings, default value
 
 	public function __construct($AppName,
 								IRequest $request,
@@ -44,9 +43,8 @@ class CompleteController extends Controller {
 		$curDir = $StartDir;
 		$files = $this->fixInputFiles($file);
 		$dirs = array();
-		$filePrefix = "";
-		
-		// fix curDir, so it always start with leading / 
+
+		// fix curDir, so it always start with leading /
 		if(empty($curDir)) $curDir = '/';
 		else {
 			if(strlen($curDir)>1 && substr($curDir,0,1)!=='/'){
@@ -58,7 +56,6 @@ class CompleteController extends Controller {
 			$pathinfo = pathinfo($curDir);
 			$curDir = $pathinfo['dirname'];
 			if($curDir == ".") $curDir = "";
-			$filePrefix = $pathinfo['basename'];
 		}
 		if(!($this->storage->nodeExists($curDir)
 			&& $this->storage->get($curDir)->getType()===\OCP\Files\FileInfo::TYPE_FOLDER
@@ -71,14 +68,9 @@ class CompleteController extends Controller {
 		}
 		$patternFile = '!('. implode(')|(',$files) .')!';
 		if($curDir!="/" && !preg_match($patternFile,$curDir)) $dirs[] = $curDir;
-		$tmp = $this->getDirList(
-								$curDir,
-								$files,
-								$filePrefix,
-								$this->showLayers);
-		$dirs = array_merge($dirs,$tmp);
-		
-		return $dirs;
+
+        $fileDir = dirname($files[0]);
+		return $this->getSiblingDirsFor($fileDir); // Return only sibling dirs
 	}
 
 	/**
@@ -101,37 +93,42 @@ class CompleteController extends Controller {
 	}
 
 	/**
-	 * Recursively create a directory listing for the current directory $dir, ignoring $actFile with the depth $depth
+	 * Returns only sibling directories for given one.
 	 *
-	 * @param string $dir - current directory
-	 * @param string $actFile - file to be ignored
-	 * @param string filePrefix - prefix with which the folder name should start
-	 * @param int $depth - which depth, -1=all (sub-)levels, 0=finish
-	 */
-	private function getDirList($dir, $actFile, $filePrefix, $depth=-1){
-		if($depth == 0) return array(); // Abbruch wenn depth = 0
-		$ret = array();
-		$patternFile = '!(('.implode(')|(',$actFile).'))$!';
-		$folder = $this->storage->get($dir)->getDirectoryListing();
-		$actFileDir = dirname($actFile[0]); // ignore exactly this path
-		if(substr($dir,-1)=='/') $dir = substr($dir,0,-1); //remove ending '/'
-		foreach($folder as $i ){
-			// ignore files other than directories
-			if($i->getType()!==\OCP\Files\FileInfo::TYPE_FOLDER) continue;
-			if(!empty($filePrefix) && !(stripos($i->getName(), $filePrefix)===0)) continue; // continue when file-prefix is given and the prefix doesn't match
+	 * @param String $path - base path for siblings search
+	 *
+	 * @return array - sibling directories paths without given one
+     */
+    private function getSiblingDirsFor($path) {
+        if ($path === '/') {
+            return $this->extractDirsFrom($path);
+        }
 
-			$path = $dir.'/'.$i->getName();
-			
-			// ignore directories that are within the files to be moved
-			if(preg_match($patternFile,$path)) continue;
+        if(substr($path,-1)=='/') $path = substr($path,0,-1); //remove ending '/'
+		$parentPath = substr($path, 0, strrpos($path, '/'));
 
-			// only list paths, that are writable and are not the files own directory
-			if($i->isUpdateable() && $path != $actFileDir){
-				$ret[] =  $path;
-			}
-			//recursion for all sub directories
-			$ret = array_merge($ret,$this->getDirList($path,$actFile,$filePrefix, $depth-1));
-		}
-		return $ret;
+        return $this->extractDirsFrom($parentPath, $path);
 	}
+
+    /**
+     * Extracts all directories from given path.
+     *
+     * @param             $path
+     * @param String|null $exclude
+     *
+     * @return array
+     */
+    private function extractDirsFrom($path, $exclude = null) {
+        $dirs = array();
+        $dirEntries = $this->storage->get($path)->getDirectoryListing();
+        foreach ($dirEntries as $entry) {
+            if($entry->getType()!==\OCP\Files\FileInfo::TYPE_FOLDER) continue;
+
+            $entryPath = $path.'/'.$entry->getName();
+            if($entry->isUpdateable() && $entryPath != $exclude){
+                $dirs[] =  $entryPath;
+            }
+        }
+        return $dirs;
+    }
 }
